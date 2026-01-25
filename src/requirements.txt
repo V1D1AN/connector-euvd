@@ -1,4 +1,6 @@
-pycti>=6.4.0
+# Pin pycti to match your OpenCTI version
+# pycti version MUST match OpenCTI platform version
+pycti==6.9.10
 stix2>=3.0.0
 requests>=2.31.0
 python-dateutil>=2.8.2

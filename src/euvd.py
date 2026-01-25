@@ -108,11 +108,27 @@ class EUVDConnector:
             default=False,
         )
         
+        # Force run option - bypasses last_run check for testing
+        self.euvd_force_run = get_config_variable(
+            "EUVD_FORCE_RUN",
+            ["euvd", "force_run"],
+            self.helper.config,
+            default=False,
+        )
+        
         # Create ENISA identity as the source organization
         self.identity = self._create_enisa_identity()
         
         # API rate limiting - EUVD recommends 1 request per 6 seconds
         self.request_delay = 6
+        
+        # HTTP session with proper headers
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Accept": "application/json",
+            "User-Agent": "OpenCTI-EUVD-Connector/1.0 (https://github.com/OpenCTI-Platform/connectors)",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
         
         self.helper.log_info("EUVD Connector initialized successfully")
 
@@ -397,10 +413,9 @@ class EUVDConnector:
         
         try:
             self.helper.log_debug(f"Fetching EUVD data: {url} with params: {params}")
-            response = requests.get(
+            response = self.session.get(
                 url,
                 params=params,
-                headers={"Accept": "application/json"},
                 timeout=60,
             )
             response.raise_for_status()
@@ -414,11 +429,7 @@ class EUVDConnector:
         """Fetch the latest vulnerabilities from EUVD."""
         url = f"{self.euvd_base_url}/lastvulnerabilities"
         try:
-            response = requests.get(
-                url,
-                headers={"Accept": "application/json"},
-                timeout=30,
-            )
+            response = self.session.get(url, timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -429,11 +440,7 @@ class EUVDConnector:
         """Fetch the latest exploited vulnerabilities from EUVD."""
         url = f"{self.euvd_base_url}/exploitedvulnerabilities"
         try:
-            response = requests.get(
-                url,
-                headers={"Accept": "application/json"},
-                timeout=30,
-            )
+            response = self.session.get(url, timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -444,11 +451,7 @@ class EUVDConnector:
         """Fetch the latest critical vulnerabilities from EUVD."""
         url = f"{self.euvd_base_url}/criticalvulnerabilities"
         try:
-            response = requests.get(
-                url,
-                headers={"Accept": "application/json"},
-                timeout=30,
-            )
+            response = self.session.get(url, timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -621,7 +624,7 @@ class EUVDConnector:
                 
                 # Check if we should run based on last run time
                 current_state = self.helper.get_state()
-                if current_state is not None and "last_run" in current_state:
+                if not self.euvd_force_run and current_state is not None and "last_run" in current_state:
                     last_run = current_state["last_run"]
                     last_run_dt = datetime.fromisoformat(last_run.replace("Z", "+00:00"))
                     # Check if enough time has passed
