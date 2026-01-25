@@ -345,6 +345,20 @@ class EUVDConnector:
             # Determine the vulnerability name
             vuln_name = cve_id if cve_id else euvd_id
             
+            # Build aliases - always include EUVD ID
+            aliases_list = [euvd_id]
+            if cve_id and cve_id != euvd_id:
+                # If we're using CVE as name, EUVD ID is already in aliases
+                # Also add any other aliases from the data
+                pass
+            
+            # Add other aliases from the aliases field (GSD, etc.)
+            if aliases:
+                for alias in aliases.split("\n"):
+                    alias = alias.strip()
+                    if alias and alias not in aliases_list and alias != vuln_name:
+                        aliases_list.append(alias)
+            
             # Generate deterministic STIX ID
             vuln_uuid = self._generate_stix_id(vuln_name)
             
@@ -353,6 +367,7 @@ class EUVDConnector:
                 id=f"vulnerability--{vuln_uuid}",
                 name=vuln_name,
                 description=full_description,
+                aliases=aliases_list,
                 created=date_published if date_published else datetime.now(timezone.utc),
                 modified=date_updated if date_updated else datetime.now(timezone.utc),
                 created_by_ref=self.identity.id,
