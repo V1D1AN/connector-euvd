@@ -479,10 +479,12 @@ class EUVDConnector:
         elif self.euvd_maintain_data:
             # Get data from last run or default range
             state = self.helper.get_state()
-            if state and "last_run" in state:
-                last_run = datetime.fromisoformat(state["last_run"])
+            if state and "last_run" in state and state.get("vulnerabilities_processed", 0) > 0:
+                # Only use last_run if previous run was successful (processed > 0)
+                last_run = datetime.fromisoformat(state["last_run"].replace("Z", "+00:00"))
                 from_date = last_run.strftime("%Y-%m-%d")
             else:
+                # First run or previous run failed - use max_date_range
                 from_date = (
                     datetime.now(timezone.utc) - timedelta(days=self.euvd_max_date_range)
                 ).strftime("%Y-%m-%d")
