@@ -1,0 +1,42 @@
+version: '3'
+
+services:
+  connector-euvd:
+    image: opencti/connector-euvd:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # OpenCTI Configuration
+      - OPENCTI_URL=http://localhost:8080
+      - OPENCTI_TOKEN=ChangeMe
+      
+      # Connector Configuration
+      - CONNECTOR_ID=ChangeMe  # Valid UUIDv4
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=EUVD
+      - CONNECTOR_SCOPE=vulnerability
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_DURATION_PERIOD=PT6H
+      - CONNECTOR_RUN_AND_TERMINATE=false
+      - CONNECTOR_QUEUE_THRESHOLD=500
+      
+      # EUVD Specific Configuration
+      - EUVD_BASE_URL=https://euvdservices.enisa.europa.eu/api
+      - EUVD_INTERVAL=6  # In hours
+      - EUVD_MAX_DATE_RANGE=30  # In days
+      - EUVD_MAINTAIN_DATA=true
+      - EUVD_PULL_HISTORY=false
+      - EUVD_HISTORY_START_YEAR=2024
+      - EUVD_MIN_SCORE=0
+      - EUVD_IMPORT_EXPLOITED_ONLY=false
+      - EUVD_IMPORT_CRITICAL_ONLY=false
+    restart: always
+    depends_on:
+      - opencti
+    networks:
+      - opencti-net
+
+networks:
+  opencti-net:
+    external: true

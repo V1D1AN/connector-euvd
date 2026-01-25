@@ -1,0 +1,41 @@
+opencti:
+  url: 'http://localhost:8080'
+  token: 'ChangeMe'
+
+connector:
+  id: 'ChangeMe'  # Valid UUIDv4
+  type: 'EXTERNAL_IMPORT'
+  name: 'EUVD'
+  scope: 'vulnerability'
+  log_level: 'info'
+  duration: 'PT6H'  # ISO 8601 duration format
+  run_and_terminate: false
+  queue_threshold: 500
+
+euvd:
+  # Base URL for the EUVD API (default: ENISA's API endpoint)
+  base_url: 'https://euvdservices.enisa.europa.eu/api'
+  
+  # Interval between connector runs in hours (minimum 2 recommended)
+  interval: 6
+  
+  # Maximum date range in days for initial fetch (max 120 days per API limits)
+  max_date_range: 30
+  
+  # Keep data updated by fetching only changes since last run
+  maintain_data: true
+  
+  # Pull historical data from a specific year (requires history_start_year)
+  pull_history: false
+  
+  # Start year for historical data pull
+  history_start_year: 2024
+  
+  # Minimum CVSS score to import (0-10)
+  min_score: 0
+  
+  # Only import exploited vulnerabilities
+  import_exploited_only: false
+  
+  # Only import critical vulnerabilities (CVSS >= 9.0)
+  import_critical_only: false
