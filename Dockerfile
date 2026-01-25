@@ -4,12 +4,14 @@ FROM python:3.11-alpine
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install build dependencies
+# Install build dependencies and libmagic
 RUN apk add --no-cache \
     gcc \
     musl-dev \
     libffi-dev \
-    openssl-dev
+    openssl-dev \
+    libmagic \
+    file-dev
 
 # Create app directory
 WORKDIR /opt/opencti-connector-euvd

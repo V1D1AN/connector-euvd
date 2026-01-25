@@ -4,14 +4,17 @@ Imports vulnerability data from ENISA's EUVD API into OpenCTI.
 """
 
 import hashlib
+import os
 import re
 import time
+import traceback
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
 import stix2
+import yaml
 from dateutil.parser import parse as dateutil_parse
 from pycti import OpenCTIConnectorHelper, get_config_variable
 
@@ -27,7 +30,15 @@ class EUVDConnector:
 
     def __init__(self):
         """Initialize the EUVD connector with configuration."""
-        self.helper = OpenCTIConnectorHelper({})
+        # Load configuration from file or environment
+        config_file_path = os.path.dirname(os.path.abspath(__file__)) + "/config.yml"
+        config = (
+            yaml.load(open(config_file_path, encoding="utf-8"), Loader=yaml.SafeLoader)
+            if os.path.isfile(config_file_path)
+            else {}
+        )
+        
+        self.helper = OpenCTIConnectorHelper(config)
         
         # EUVD specific configuration
         self.euvd_base_url = get_config_variable(
@@ -597,55 +608,77 @@ class EUVDConnector:
         """
         self.helper.log_info("Starting EUVD Connector")
         
+        # Main loop
+        get_run_and_terminate = getattr(
+            self.helper, "connect_run_and_terminate", False
+        )
+        
         while True:
             try:
                 # Get current timestamp for work tracking
                 timestamp = int(datetime.now(timezone.utc).timestamp())
                 current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 
+                # Check if we should run based on last run time
+                current_state = self.helper.get_state()
+                if current_state is not None and "last_run" in current_state:
+                    last_run = current_state["last_run"]
+                    last_run_dt = datetime.fromisoformat(last_run.replace("Z", "+00:00"))
+                    # Check if enough time has passed
+                    next_run = last_run_dt + timedelta(hours=self.euvd_interval)
+                    if datetime.now(timezone.utc) < next_run:
+                        wait_seconds = (next_run - datetime.now(timezone.utc)).total_seconds()
+                        self.helper.log_info(
+                            f"Connector will not run until {next_run.strftime('%Y-%m-%d %H:%M:%S')} UTC. "
+                            f"Sleeping for {int(wait_seconds)} seconds."
+                        )
+                        time.sleep(min(wait_seconds, 60))  # Sleep max 60s then recheck
+                        continue
+                
                 # Create work entry
+                friendly_name = f"EUVD Connector run @ {current_time}"
                 work_id = self.helper.api.work.initiate_work(
                     self.helper.connect_id,
-                    f"EUVD Connector run @ {current_time}",
+                    friendly_name,
                 )
                 
                 self.helper.log_info(f"EUVD Connector run starting at {current_time}")
                 
-                # Process vulnerabilities
-                processed = self._process_vulnerabilities(work_id)
-                
-                # Update state
-                self.helper.set_state(
-                    {
-                        "last_run": datetime.now(timezone.utc).isoformat(),
-                        "vulnerabilities_processed": processed,
-                    }
-                )
-                
-                # Mark work as completed
-                message = f"Connector successfully run, processed {processed} vulnerabilities"
-                self.helper.log_info(message)
-                self.helper.api.work.to_processed(work_id, message)
+                try:
+                    # Process vulnerabilities
+                    processed = self._process_vulnerabilities(work_id)
+                    
+                    # Update state
+                    self.helper.set_state(
+                        {
+                            "last_run": datetime.now(timezone.utc).isoformat(),
+                            "vulnerabilities_processed": processed,
+                        }
+                    )
+                    
+                    # Mark work as completed
+                    message = f"Connector successfully run, processed {processed} vulnerabilities"
+                    self.helper.log_info(message)
+                    self.helper.api.work.to_processed(work_id, message)
+                    
+                except Exception as e:
+                    self.helper.log_error(f"Error during processing: {e}")
+                    self.helper.api.work.to_processed(work_id, str(e), in_error=True)
+                    raise
                 
             except (KeyboardInterrupt, SystemExit):
                 self.helper.log_info("Connector stopped by user")
                 break
             except Exception as e:
                 self.helper.log_error(f"Connector run failed: {e}")
-                import traceback
                 self.helper.log_error(traceback.format_exc())
+                # Sleep before retry on error
+                time.sleep(60)
             
-            # Wait for next interval
-            if self.helper.connect_run_and_terminate:
+            # Check run_and_terminate mode
+            if get_run_and_terminate:
                 self.helper.log_info("Run and terminate mode - exiting")
                 break
             
-            self.helper.log_info(
-                f"Connector run completed. Next run in {self.euvd_interval} hours"
-            )
-            
-            # Schedule next run
-            self.helper.schedule_iso(
-                message=f"Next run in {self.euvd_interval} hours",
-                duration_period=f"PT{self.euvd_interval}H",
-            )
+            # Sleep for a short period before next iteration
+            time.sleep(60)
