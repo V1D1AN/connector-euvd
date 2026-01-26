@@ -196,7 +196,7 @@ class EUVDConnector:
         Generate a deterministic STIX UUID from a name.
         
         Uses namespace UUID for OpenCTI vulnerabilities to ensure
-        consistent IDs across runs.
+        consistent IDs across runs. Generates a valid UUIDv4-like format.
         """
         # OpenCTI namespace UUID for vulnerabilities
         namespace = "00abedb4-aa42-466c-9c01-fed23315a9b7"
@@ -205,8 +205,20 @@ class EUVDConnector:
         hash_input = f"{namespace}{name}".encode("utf-8")
         hash_digest = hashlib.sha256(hash_input).hexdigest()
         
-        # Format as UUID (8-4-4-4-12)
-        uuid_str = f"{hash_digest[:8]}-{hash_digest[8:12]}-{hash_digest[12:16]}-{hash_digest[16:20]}-{hash_digest[20:32]}"
+        # Format as valid UUID v4 (8-4-4-4-12)
+        # Set version to 4 (bits 12-15 of time_hi_and_version)
+        # Set variant to RFC 4122 (bits 6-7 of clock_seq_hi_and_reserved)
+        uuid_hex = hash_digest[:32]
+        
+        # Insert version 4 at position 12 (13th character)
+        # Insert variant (8, 9, a, or b) at position 16 (17th character)
+        uuid_str = (
+            f"{uuid_hex[:8]}-"
+            f"{uuid_hex[8:12]}-"
+            f"4{uuid_hex[13:16]}-"  # Version 4
+            f"{'89ab'[int(uuid_hex[16], 16) % 4]}{uuid_hex[17:20]}-"  # Variant
+            f"{uuid_hex[20:32]}"
+        )
         
         return uuid_str
 
