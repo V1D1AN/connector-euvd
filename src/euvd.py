@@ -374,6 +374,15 @@ class EUVDConnector:
             # Generate deterministic STIX ID
             vuln_uuid = self._generate_stix_id(vuln_name)
             
+            # Add x_opencti_aliases for OpenCTI search indexing
+            # This ensures EUVD ID is searchable even when CVE is the main name
+            opencti_aliases = aliases_list.copy()
+            if vuln_name not in opencti_aliases:
+                opencti_aliases.append(vuln_name)
+            
+            # Create custom properties for OpenCTI
+            custom_properties["x_opencti_aliases"] = opencti_aliases
+            
             # Create the STIX Vulnerability object
             vulnerability = stix2.Vulnerability(
                 id=f"vulnerability--{vuln_uuid}",
