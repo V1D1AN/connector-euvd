@@ -612,32 +612,6 @@ class EUVDConnector:
             vuln_id = existing.get("id")
             self.helper.log_debug(f"Found existing vulnerability {cve_id} with ID {vuln_id}")
             
-            # Get existing aliases and add EUVD ID
-            existing_aliases = existing.get("aliases", []) or []
-            aliases_str = vuln_data.get("aliases", "")
-            
-            new_aliases = [euvd_id]
-            if aliases_str:
-                for alias in aliases_str.split("\n"):
-                    alias = alias.strip()
-                    if alias and alias != cve_id:
-                        new_aliases.append(alias)
-            
-            # Merge aliases
-            merged_aliases = list(set(existing_aliases + new_aliases))
-            
-            # Update aliases if there are new ones
-            if set(merged_aliases) != set(existing_aliases):
-                self.helper.api.stix_domain_object.update_field(
-                    id=vuln_id,
-                    input={"key": "aliases", "value": merged_aliases}
-                )
-                self.helper.api.stix_domain_object.update_field(
-                    id=vuln_id,
-                    input={"key": "x_opencti_aliases", "value": merged_aliases}
-                )
-                self.helper.log_debug(f"Updated aliases for {cve_id}: {merged_aliases}")
-            
             # Add EUVD external reference
             euvd_url = f"https://euvd.enisa.europa.eu/vulnerability/{euvd_id}"
             existing_refs = existing.get("externalReferences", []) or []
@@ -656,9 +630,11 @@ class EUVDConnector:
                         id=vuln_id,
                         external_reference_id=ext_ref["id"]
                     )
-                    self.helper.log_debug(f"Added EUVD external reference to {cve_id}")
+                    self.helper.log_info(f"Added EUVD external reference to {cve_id}")
                 except Exception as e:
                     self.helper.log_warning(f"Could not add external reference: {e}")
+            else:
+                self.helper.log_debug(f"EUVD reference already exists for {cve_id}")
             
             return True
             
