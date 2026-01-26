@@ -47,10 +47,12 @@ This connector:
 
 ## Requirements
 
-- OpenCTI Platform >= 6.0.0
+- **OpenCTI Platform >= 6.9.10** (pycti version must match OpenCTI version)
 - Python >= 3.10 (for manual deployment)
 - Docker and Docker Compose (for containerized deployment)
 - Network access to `euvdservices.enisa.europa.eu`
+
+> **Important**: The `pycti` version in `requirements.txt` must match your OpenCTI platform version. If you use a different OpenCTI version, update `pycti==6.9.10` accordingly.
 
 ## Configuration
 
