@@ -344,38 +344,23 @@ class EUVDConnector:
             # Determine the vulnerability name
             vuln_name = cve_id if cve_id else euvd_id
             
-            # Build aliases - always include EUVD ID
+            # Build aliases - always include EUVD ID and other aliases
             aliases_list = [euvd_id]
-            if cve_id and cve_id != euvd_id:
-                # If we're using CVE as name, EUVD ID is already in aliases
-                # Also add any other aliases from the data
-                pass
-            
-            # Add other aliases from the aliases field (GSD, etc.)
             if aliases:
                 for alias in aliases.split("\n"):
                     alias = alias.strip()
                     if alias and alias not in aliases_list and alias != vuln_name:
                         aliases_list.append(alias)
             
-            # Generate deterministic STIX ID based on vulnerability name
-            # Use the same format as OpenCTI's CVE connector for compatibility
-            # OpenCTI will deduplicate based on the name if IDs differ
+            # Generate a deterministic STIX ID for this vulnerability
             vuln_uuid = self._generate_stix_id(vuln_name)
             
             # Add x_opencti_aliases for OpenCTI search indexing
             # This ensures EUVD ID is searchable even when CVE is the main name
             opencti_aliases = aliases_list.copy()
-            if vuln_name not in opencti_aliases:
-                opencti_aliases.append(vuln_name)
             
             # Create custom properties for OpenCTI
             custom_properties["x_opencti_aliases"] = opencti_aliases
-            
-            # Use x_opencti_stix_ids to link with existing CVE if present
-            # This helps OpenCTI merge with existing vulnerabilities
-            if cve_id:
-                custom_properties["x_opencti_stix_ids"] = [f"vulnerability--{self._generate_stix_id(cve_id)}"]
             
             # Create the STIX Vulnerability object
             vulnerability = stix2.Vulnerability(
@@ -556,14 +541,35 @@ class EUVDConnector:
         
         self.helper.log_info(f"Retrieved {len(vulnerabilities)} vulnerabilities from EUVD")
         
-        # Convert to STIX objects
+        # Process vulnerabilities
         for vuln_data in vulnerabilities:
-            vuln_stix = self._create_vulnerability(vuln_data)
-            if vuln_stix:
-                stix_objects.append(vuln_stix)
-                total_processed += 1
+            try:
+                euvd_id = vuln_data.get("id")
+                aliases_str = vuln_data.get("aliases", "")
+                cve_id = self._extract_cve_id(aliases_str)
+                
+                if cve_id:
+                    # CVE exists - try to update existing vulnerability in OpenCTI
+                    if self._update_existing_vulnerability(vuln_data, cve_id, euvd_id):
+                        total_processed += 1
+                        self.helper.log_debug(f"Updated existing CVE: {cve_id} with EUVD data")
+                    else:
+                        # CVE not found in OpenCTI - create new vulnerability
+                        vuln_stix = self._create_vulnerability(vuln_data)
+                        if vuln_stix:
+                            stix_objects.append(vuln_stix)
+                            total_processed += 1
+                else:
+                    # No CVE - create new EUVD-only vulnerability
+                    vuln_stix = self._create_vulnerability(vuln_data)
+                    if vuln_stix:
+                        stix_objects.append(vuln_stix)
+                        total_processed += 1
+                        
+            except Exception as e:
+                self.helper.log_error(f"Failed to process vulnerability {vuln_data.get('id')}: {e}")
         
-        # Send STIX bundle to OpenCTI
+        # Send STIX bundle for new vulnerabilities
         if len(stix_objects) > 1:  # More than just the identity
             bundle = stix2.Bundle(objects=stix_objects, allow_custom=True)
             self.helper.send_stix2_bundle(
@@ -571,11 +577,94 @@ class EUVDConnector:
                 update=self.euvd_maintain_data,
                 work_id=work_id,
             )
-            self.helper.log_info(f"Sent {total_processed} vulnerabilities to OpenCTI")
-        else:
-            self.helper.log_info("No vulnerabilities to import")
+            self.helper.log_info(f"Sent {len(stix_objects) - 1} new vulnerabilities to OpenCTI")
+        
+        self.helper.log_info(f"Total processed: {total_processed} vulnerabilities")
         
         return total_processed
+
+    def _update_existing_vulnerability(self, vuln_data: dict, cve_id: str, euvd_id: str) -> bool:
+        """
+        Update an existing CVE vulnerability with EUVD data.
+        
+        Args:
+            vuln_data: EUVD vulnerability data
+            cve_id: CVE identifier
+            euvd_id: EUVD identifier
+            
+        Returns:
+            True if update successful, False if CVE not found
+        """
+        try:
+            # Search for existing vulnerability by name
+            existing = self.helper.api.vulnerability.read(
+                filters={
+                    "mode": "and",
+                    "filters": [{"key": "name", "values": [cve_id]}],
+                    "filterGroups": [],
+                }
+            )
+            
+            if not existing:
+                self.helper.log_debug(f"CVE {cve_id} not found in OpenCTI, will create new")
+                return False
+            
+            vuln_id = existing.get("id")
+            self.helper.log_debug(f"Found existing vulnerability {cve_id} with ID {vuln_id}")
+            
+            # Get existing aliases and add EUVD ID
+            existing_aliases = existing.get("aliases", []) or []
+            aliases_str = vuln_data.get("aliases", "")
+            
+            new_aliases = [euvd_id]
+            if aliases_str:
+                for alias in aliases_str.split("\n"):
+                    alias = alias.strip()
+                    if alias and alias != cve_id:
+                        new_aliases.append(alias)
+            
+            # Merge aliases
+            merged_aliases = list(set(existing_aliases + new_aliases))
+            
+            # Update aliases if there are new ones
+            if set(merged_aliases) != set(existing_aliases):
+                self.helper.api.stix_domain_object.update_field(
+                    id=vuln_id,
+                    input={"key": "aliases", "value": merged_aliases}
+                )
+                self.helper.api.stix_domain_object.update_field(
+                    id=vuln_id,
+                    input={"key": "x_opencti_aliases", "value": merged_aliases}
+                )
+                self.helper.log_debug(f"Updated aliases for {cve_id}: {merged_aliases}")
+            
+            # Add EUVD external reference
+            euvd_url = f"https://euvd.enisa.europa.eu/vulnerability/{euvd_id}"
+            existing_refs = existing.get("externalReferences", []) or []
+            existing_urls = {ref.get("url") for ref in existing_refs if ref.get("url")}
+            
+            if euvd_url not in existing_urls:
+                try:
+                    # Create external reference
+                    ext_ref = self.helper.api.external_reference.create(
+                        source_name="EUVD",
+                        url=euvd_url,
+                        external_id=euvd_id,
+                    )
+                    # Add to vulnerability
+                    self.helper.api.stix_domain_object.add_external_reference(
+                        id=vuln_id,
+                        external_reference_id=ext_ref["id"]
+                    )
+                    self.helper.log_debug(f"Added EUVD external reference to {cve_id}")
+                except Exception as e:
+                    self.helper.log_warning(f"Could not add external reference: {e}")
+            
+            return True
+            
+        except Exception as e:
+            self.helper.log_error(f"Error updating vulnerability {cve_id}: {e}")
+            return False
 
     def _fetch_with_pagination(
         self,
