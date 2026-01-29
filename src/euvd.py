@@ -612,6 +612,47 @@ class EUVDConnector:
             vuln_id = existing.get("id")
             self.helper.log_debug(f"Found existing vulnerability {cve_id} with ID {vuln_id}")
             
+            # Build list of new aliases to add
+            aliases_str = vuln_data.get("aliases", "")
+            new_aliases = [euvd_id]
+            if aliases_str:
+                for alias in aliases_str.split("\n"):
+                    alias = alias.strip()
+                    if alias and alias != cve_id:
+                        new_aliases.append(alias)
+            
+            # Get existing aliases to avoid duplicates
+            existing_aliases = existing.get("x_opencti_aliases", []) or []
+            aliases_to_add = [a for a in new_aliases if a not in existing_aliases]
+            
+            # Add aliases via GraphQL fieldPatch
+            if aliases_to_add:
+                try:
+                    self.helper.api.query(
+                        """
+                        mutation AddAlias($id: ID!, $input: [EditInput!]!) {
+                            stixDomainObjectEdit(id: $id) {
+                                fieldPatch(input: $input) {
+                                    id
+                                }
+                            }
+                        }
+                        """,
+                        {
+                            "id": vuln_id,
+                            "input": [
+                                {
+                                    "key": "x_opencti_aliases",
+                                    "value": aliases_to_add,
+                                    "operation": "add"
+                                }
+                            ]
+                        }
+                    )
+                    self.helper.log_info(f"Added aliases {aliases_to_add} to {cve_id}")
+                except Exception as e:
+                    self.helper.log_warning(f"Could not add aliases: {e}")
+            
             # Add EUVD external reference
             euvd_url = f"https://euvd.enisa.europa.eu/vulnerability/{euvd_id}"
             existing_refs = existing.get("externalReferences", []) or []
